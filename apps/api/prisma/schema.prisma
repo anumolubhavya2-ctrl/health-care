@@ -1,0 +1,532 @@
+// CareSync Prisma Schema
+// Healthcare Appointment Booking Platform
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserRole {
+  PATIENT
+  DOCTOR
+  ADMIN
+  SUPPORT_AGENT
+}
+
+enum DoctorStatus {
+  AVAILABLE
+  BUSY
+  DELAYED
+  ON_LEAVE
+  IN_CONSULTATION
+  OFFLINE
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CHECKED_IN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+  RESCHEDULED
+}
+
+enum ConsultationType {
+  IN_PERSON
+  VIDEO
+  PHONE
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum RefundStatus {
+  REQUESTED
+  UNDER_REVIEW
+  APPROVED
+  PROCESSED
+  REJECTED
+}
+
+enum SupportStatus {
+  OPEN
+  IN_PROGRESS
+  ESCALATED
+  RESOLVED
+  CLOSED
+}
+
+enum SupportPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum NotificationType {
+  APPOINTMENT_CONFIRMED
+  APPOINTMENT_CANCELLED
+  APPOINTMENT_REMINDER
+  QUEUE_UPDATE
+  DOCTOR_STATUS_CHANGE
+  REFUND_UPDATE
+  SUPPORT_MESSAGE
+  PAYMENT_SUCCESS
+  PAYMENT_FAILED
+  GENERAL
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+// ============================================================
+// USER
+// ============================================================
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  phone         String?   @unique
+  passwordHash  String
+  role          UserRole  @default(PATIENT)
+  isActive      Boolean   @default(true)
+  isVerified    Boolean   @default(false)
+  emailVerifiedAt DateTime?
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  patient       Patient?
+  doctor        Doctor?
+  admin         Admin?
+  notifications Notification[]
+  refreshTokens RefreshToken[]
+  supportMessages SupportMessage[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  isRevoked Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+// ============================================================
+// PATIENT
+// ============================================================
+
+model Patient {
+  id            String    @id @default(uuid())
+  userId        String    @unique
+  firstName     String
+  lastName      String
+  dateOfBirth   DateTime?
+  gender        Gender    @default(PREFER_NOT_TO_SAY)
+  bloodGroup    String?
+  address       String?
+  city          String?
+  state         String?
+  country       String    @default("India")
+  pincode       String?
+  profileImage  String?
+  medicalHistory String?
+  allergies     String[]
+  emergencyContact String?
+  emergencyPhone String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appointments  Appointment[]
+  reviews       Review[]
+  payments      Payment[]
+
+  @@map("patients")
+}
+
+// ============================================================
+// DOCTOR
+// ============================================================
+
+model Doctor {
+  id              String       @id @default(uuid())
+  userId          String       @unique
+  firstName       String
+  lastName        String
+  gender          Gender       @default(PREFER_NOT_TO_SAY)
+  profileImage    String?
+  registrationNo  String?      @unique
+  bio             String?
+  experience      Int          @default(0)
+  qualifications  String[]
+  languages       String[]     @default(["English"])
+  consultationFee Decimal      @db.Decimal(10, 2) @default(500)
+  videoFee        Decimal?     @db.Decimal(10, 2)
+  phoneFee        Decimal?     @db.Decimal(10, 2)
+  status          DoctorStatus @default(OFFLINE)
+  statusMessage   String?
+  delayMinutes    Int?
+  isAvailableForVideo Boolean  @default(false)
+  isAvailableForPhone Boolean  @default(false)
+  clinicName      String?
+  clinicAddress   String?
+  clinicCity      String?
+  clinicState     String?
+  clinicPincode   String?
+  latitude        Decimal?     @db.Decimal(10, 8)
+  longitude       Decimal?     @db.Decimal(11, 8)
+  rating          Decimal      @db.Decimal(3, 2) @default(0)
+  totalReviews    Int          @default(0)
+  totalPatients   Int          @default(0)
+  isVerified      Boolean      @default(false)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  // Relations
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  specialties     DoctorSpecialty[]
+  availabilities  Availability[]
+  appointments    Appointment[]
+  reviews         Review[]
+  queue           Queue?
+  statusLogs      DoctorStatusLog[]
+
+  @@map("doctors")
+}
+
+model DoctorStatusLog {
+  id         String       @id @default(uuid())
+  doctorId   String
+  status     DoctorStatus
+  message    String?
+  createdAt  DateTime     @default(now())
+
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@map("doctor_status_logs")
+}
+
+// ============================================================
+// ADMIN
+// ============================================================
+
+model Admin {
+  id         String   @id @default(uuid())
+  userId     String   @unique
+  firstName  String
+  lastName   String
+  department String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedTickets  SupportTicket[]
+
+  @@map("admins")
+}
+
+// ============================================================
+// SPECIALTY
+// ============================================================
+
+model Specialty {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  icon        String?
+  color       String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  doctors     DoctorSpecialty[]
+  symptoms    SymptomMapping[]
+
+  @@map("specialties")
+}
+
+model DoctorSpecialty {
+  id          String   @id @default(uuid())
+  doctorId    String
+  specialtyId String
+  isPrimary   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  doctor    Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  specialty Specialty @relation(fields: [specialtyId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, specialtyId])
+  @@map("doctor_specialties")
+}
+
+model SymptomMapping {
+  id          String   @id @default(uuid())
+  symptom     String
+  keywords    String[]
+  specialtyId String
+  confidence  Decimal  @db.Decimal(3, 2) @default(0.8)
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  specialty Specialty @relation(fields: [specialtyId], references: [id], onDelete: Cascade)
+
+  @@map("symptom_mappings")
+}
+
+// ============================================================
+// AVAILABILITY
+// ============================================================
+
+model Availability {
+  id          String   @id @default(uuid())
+  doctorId    String
+  dayOfWeek   Int      // 0=Sunday, 1=Monday, ..., 6=Saturday
+  startTime   String   // "09:00"
+  endTime     String   // "17:00"
+  slotDuration Int     @default(30) // minutes
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, dayOfWeek])
+  @@map("availabilities")
+}
+
+// ============================================================
+// APPOINTMENT
+// ============================================================
+
+model Appointment {
+  id               String            @id @default(uuid())
+  patientId        String
+  doctorId         String
+  scheduledDate    DateTime
+  scheduledTime    String
+  endTime          String?
+  consultationType ConsultationType  @default(IN_PERSON)
+  status           AppointmentStatus @default(PENDING)
+  tokenNumber      Int?
+  queuePosition    Int?
+  symptoms         String?
+  notes            String?
+  doctorNotes      String?
+  diagnosis        String?
+  prescription     String?
+  followUpDate     DateTime?
+  actualStartTime  DateTime?
+  actualEndTime    DateTime?
+  cancellationReason String?
+  cancelledAt      DateTime?
+  cancelledBy      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  // Relations
+  patient  Patient   @relation(fields: [patientId], references: [id])
+  doctor   Doctor    @relation(fields: [doctorId], references: [id])
+  payment  Payment?
+  refund   Refund?
+  queueEntry QueueEntry?
+
+  @@map("appointments")
+}
+
+// ============================================================
+// QUEUE
+// ============================================================
+
+model Queue {
+  id              String   @id @default(uuid())
+  doctorId        String   @unique
+  date            DateTime @default(now())
+  currentToken    Int      @default(0)
+  totalTokens     Int      @default(0)
+  avgWaitMinutes  Int      @default(15)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  doctor  Doctor       @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  entries QueueEntry[]
+
+  @@map("queues")
+}
+
+model QueueEntry {
+  id             String    @id @default(uuid())
+  queueId        String
+  appointmentId  String    @unique
+  tokenNumber    Int
+  position       Int
+  estimatedTime  DateTime?
+  checkedInAt    DateTime?
+  calledAt       DateTime?
+  completedAt    DateTime?
+  isSkipped      Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  queue       Queue       @relation(fields: [queueId], references: [id], onDelete: Cascade)
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@map("queue_entries")
+}
+
+// ============================================================
+// PAYMENT & REFUND
+// ============================================================
+
+model Payment {
+  id              String        @id @default(uuid())
+  appointmentId   String        @unique
+  patientId       String
+  amount          Decimal       @db.Decimal(10, 2)
+  currency        String        @default("INR")
+  status          PaymentStatus @default(PENDING)
+  method          String?
+  transactionId   String?       @unique
+  gatewayResponse Json?
+  paidAt          DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id])
+  patient     Patient     @relation(fields: [patientId], references: [id])
+  refund      Refund?
+
+  @@map("payments")
+}
+
+model Refund {
+  id             String       @id @default(uuid())
+  appointmentId  String       @unique
+  paymentId      String       @unique
+  amount         Decimal      @db.Decimal(10, 2)
+  reason         String
+  status         RefundStatus @default(REQUESTED)
+  notes          String?
+  processedAt    DateTime?
+  processedBy    String?
+  transactionId  String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id])
+  payment     Payment     @relation(fields: [paymentId], references: [id])
+
+  @@map("refunds")
+}
+
+// ============================================================
+// REVIEW
+// ============================================================
+
+model Review {
+  id          String   @id @default(uuid())
+  doctorId    String
+  patientId   String
+  rating      Int
+  comment     String?
+  isVerified  Boolean  @default(false)
+  isPublic    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  doctor  Doctor  @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, patientId])
+  @@map("reviews")
+}
+
+// ============================================================
+// SUPPORT
+// ============================================================
+
+model SupportTicket {
+  id          String          @id @default(uuid())
+  patientId   String
+  subject     String
+  description String
+  category    String?
+  status      SupportStatus   @default(OPEN)
+  priority    SupportPriority @default(MEDIUM)
+  assignedTo  String?
+  resolvedAt  DateTime?
+  closedAt    DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  // Relations (patientId references user.id for simplicity)
+  assignedAdmin Admin?         @relation(fields: [assignedTo], references: [id])
+  messages      SupportMessage[]
+
+  @@map("support_tickets")
+}
+
+model SupportMessage {
+  id        String   @id @default(uuid())
+  ticketId  String
+  senderId  String
+  message   String
+  isInternal Boolean @default(false)
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  sender User          @relation(fields: [senderId], references: [id])
+
+  @@map("support_messages")
+}
+
+// ============================================================
+// NOTIFICATION
+// ============================================================
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String
+  data      Json?
+  isRead    Boolean          @default(false)
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
